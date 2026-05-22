@@ -140,7 +140,10 @@ def generate_pdf(dataframe, t_dict):
         pdf.cell(col_widths[6], 10, normalize_text_for_pdf(row[t_dict["category"]]), border=1)
         pdf.ln()
         
-    return pdf.output(dest="S").encode("latin-1", "replace")
+    pdf_out = pdf.output(dest="S")
+    if isinstance(pdf_out, (bytes, bytearray)):
+        return bytes(pdf_out)
+    return pdf_out.encode("latin-1", "replace")
 
 st.sidebar.header(t["settings_title"])
 med_thresh = st.sidebar.number_input(t["med_threshold"], min_value=2, max_value=25, value=5)
