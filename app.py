@@ -113,31 +113,39 @@ def normalize_text_for_pdf(text):
         res = res.replace(k, v)
     return unicodedata.normalize('NFKD', res).encode('ascii', 'ignore').decode('ascii')
 
+def truncate(text, max_len):
+    text = str(text)
+    return text[:max_len-2] + ".." if len(text) > max_len else text
+
 def generate_pdf(dataframe, t_dict):
     pdf = FPDF()
     pdf.add_page(orientation="L")
-    pdf.set_font("Arial", "B", 16)
-    pdf.cell(0, 10, normalize_text_for_pdf(t_dict["report_title"]), ln=True, align="C")
-    pdf.ln(10)
     
-    pdf.set_font("Arial", "B", 10)
-    col_widths = [40, 50, 50, 40, 30, 20, 25]
+    pdf.set_font("Arial", "B", 14)
+    pdf.cell(0, 10, normalize_text_for_pdf(t_dict["report_title"]), ln=True, align="C")
+    pdf.ln(5)
+    
+    col_widths = [40, 45, 45, 45, 45, 20, 35]
+    char_limits = [20, 24, 24, 24, 24, 10, 18]
+    
+    pdf.set_font("Arial", "B", 8)
     headers = [t_dict["asset"], t_dict["threat"], t_dict["vulnerability"], 
                t_dict["treatment"], t_dict["controls"], t_dict["risk_level"], t_dict["category"]]
     
     for i, header in enumerate(headers):
-        pdf.cell(col_widths[i], 10, normalize_text_for_pdf(header)[:25], border=1)
+        h_text = normalize_text_for_pdf(header)
+        pdf.cell(col_widths[i], 10, truncate(h_text, char_limits[i]), border=1, align="C")
     pdf.ln()
     
-    pdf.set_font("Arial", "", 9)
+    pdf.set_font("Arial", "", 8)
     for _, row in dataframe.iterrows():
-        pdf.cell(col_widths[0], 10, normalize_text_for_pdf(row[t_dict["asset"]])[:25], border=1)
-        pdf.cell(col_widths[1], 10, normalize_text_for_pdf(row[t_dict["threat"]])[:30], border=1)
-        pdf.cell(col_widths[2], 10, normalize_text_for_pdf(row[t_dict["vulnerability"]])[:30], border=1)
-        pdf.cell(col_widths[3], 10, normalize_text_for_pdf(row[t_dict["treatment"]])[:25], border=1)
-        pdf.cell(col_widths[4], 10, normalize_text_for_pdf(row[t_dict["controls"]])[:15], border=1)
+        pdf.cell(col_widths[0], 10, truncate(normalize_text_for_pdf(row[t_dict["asset"]]), char_limits[0]), border=1)
+        pdf.cell(col_widths[1], 10, truncate(normalize_text_for_pdf(row[t_dict["threat"]]), char_limits[1]), border=1)
+        pdf.cell(col_widths[2], 10, truncate(normalize_text_for_pdf(row[t_dict["vulnerability"]]), char_limits[2]), border=1)
+        pdf.cell(col_widths[3], 10, truncate(normalize_text_for_pdf(row[t_dict["treatment"]]), char_limits[3]), border=1)
+        pdf.cell(col_widths[4], 10, truncate(normalize_text_for_pdf(row[t_dict["controls"]]), char_limits[4]), border=1)
         pdf.cell(col_widths[5], 10, str(row[t_dict["risk_level"]]), border=1, align="C")
-        pdf.cell(col_widths[6], 10, normalize_text_for_pdf(row[t_dict["category"]]), border=1)
+        pdf.cell(col_widths[6], 10, truncate(normalize_text_for_pdf(row[t_dict["category"]]), char_limits[6]), border=1)
         pdf.ln()
         
     pdf_out = pdf.output(dest="S")
