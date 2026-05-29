@@ -2,331 +2,357 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import numpy as np
-import unicodedata
-from fpdf import FPDF
-import io
+import tempfile
+import os
 
+try:
+    from fpdf import FPDF
+    FPDF_AVAILABLE = True
+except ImportError:
+    FPDF_AVAILABLE = False
+
+# Инициализация хранилища данных сессии
 if 'risks' not in st.session_state:
     st.session_state.risks = []
+
+# Инициализация состояний для полей ввода (чтобы можно было их очищать)
+input_keys = ['in_asset', 'in_threat', 'in_vuln', 'in_controls']
+for key in input_keys:
+    if key not in st.session_state:
+        st.session_state[key] = ""
+if 'in_prob' not in st.session_state: st.session_state.in_prob = 1
+if 'in_imp' not in st.session_state: st.session_state.in_imp = 1
+if 'in_treat' not in st.session_state: st.session_state.in_treat = "Redukcja"
 
 translations = {
     "EN": {
         "title": "Information Security Risk Assessment",
+        "method_title": "Assessment Method",
+        "method_1": "Matrix Method (Quantitative-Qualitative)",
+        "method_2": "Quantitative Method",
         "sidebar_title": "Add New Risk",
-        "asset": "Asset Name",
+        "asset": "Asset",
         "threat": "Threat",
         "vulnerability": "Vulnerability",
-        "controls": "Existing Controls",
-        "treatment": "Risk Treatment",
-        "mitigate": "Mitigate",
-        "accept": "Accept",
-        "transfer": "Transfer",
-        "avoid": "Avoid",
+        "controls": "Controls",
         "probability": "Probability (1-5)",
-        "impact": "Consequences (1-5)",
-        "add_btn": "Add to Register",
-        "req_warning": "Please fill in Asset, Threat, and Vulnerability.",
+        "impact": "Impact (1-5)",
+        "treatment": "Treatment Strategy",
+        "treat_red": "Reduction",
+        "treat_acc": "Acceptance",
+        "treat_trans": "Transfer",
+        "treat_avoid": "Avoidance",
+        "add_btn": "Add Risk to Register",
+        "req_warning": "Fill Asset, Threat, and Vulnerability.",
+        "add_success": "Risk added successfully!",
         "settings_title": "Risk Appetite Settings",
         "med_threshold": "Medium Risk Threshold",
         "high_threshold": "High Risk Threshold",
         "upload_csv": "Upload Project (CSV)",
         "import_btn": "Import CSV",
-        "upload_success": "Project loaded successfully!",
         "upload_error": "Error loading file or invalid format.",
         "low": "Low",
         "medium": "Medium",
         "high": "High",
+        "matrix_title": "Risk Matrix",
+        "download_csv": "Download CSV",
+        "download_pdf": "Download PDF Report",
+        "risk_level": "Risk Level",
+        "live_risk": "Calculated Risk Level:",
+        "category": "Category",
+        "table_title": "Risk Register (Double-click to edit, select row & press DEL to delete)",
         "filter": "Filter by Category",
         "all": "All",
-        "matrix_title": "Risk Matrix",
-        "download_btn": "Download CSV",
-        "download_pdf_btn": "Download PDF",
-        "risk_level": "Risk Level",
-        "category": "Category",
-        "table_title": "Risk Register",
-        "no_data": "No risks added yet. Please use the sidebar to add entries.",
-        "total_risks": "Total Risks",
-        "critical_risks": "Critical Risks",
-        "medium_risks": "Medium Risks",
-        "low_risks": "Low Risks",
-        "report_title": "Risk Report"
+        "kpi_total": "Total Risks",
+        "kpi_high": "High",
+        "kpi_medium": "Medium",
+        "kpi_low": "Low",
+        "no_data": "No risks added yet. Use the sidebar to add entries."
     },
     "PL": {
         "title": "Ocena Ryzyka Bezpieczeństwa Informacji",
+        "method_title": "Wybór metody szacowania",
+        "method_1": "Metoda matrycowa (Ilościowo-Jakościowa)",
+        "method_2": "Metoda ilościowa",
         "sidebar_title": "Dodaj Nowe Ryzyko",
-        "asset": "Nazwa Aktywa",
+        "asset": "Aktywo",
         "threat": "Zagrożenie",
         "vulnerability": "Podatność",
-        "controls": "Istniejące Zabezpieczenia",
-        "treatment": "Postępowanie z ryzykiem",
-        "mitigate": "Redukcja (Mitigate)",
-        "accept": "Akceptacja (Accept)",
-        "transfer": "Przeniesienie (Transfer)",
-        "avoid": "Unikanie (Avoid)",
+        "controls": "Zabezpieczenia",
         "probability": "Prawdopodobieństwo (1-5)",
         "impact": "Skutki (1-5)",
+        "treatment": "Postępowanie z ryzykiem",
+        "treat_red": "Redukcja",
+        "treat_acc": "Akceptacja",
+        "treat_trans": "Przeniesienie",
+        "treat_avoid": "Unikanie",
         "add_btn": "Dodaj do Rejestru",
-        "req_warning": "Proszę wypełnić Aktywo, Zagrożenie i Podatność.",
-        "settings_title": "Kryteria Akceptacji Ryzyka",
+        "req_warning": "Wypełnij Aktywo, Zagrożenie i Podatność.",
+        "add_success": "Pomyślnie dodano ryzyko!",
+        "settings_title": "Kryteria Akceptacji",
         "med_threshold": "Próg Średniego Ryzyka",
         "high_threshold": "Próg Wysokiego Ryzyka",
         "upload_csv": "Wgraj Projekt (CSV)",
         "import_btn": "Importuj CSV",
-        "upload_success": "Projekt załadowany pomyślnie!",
-        "upload_error": "Błąd ładowania pliku lub zły format.",
+        "upload_error": "Błąd ładowania pliku.",
         "low": "Niski",
         "medium": "Średni",
         "high": "Wysoki",
+        "matrix_title": "Macierz Ryzyka",
+        "download_csv": "Pobierz CSV",
+        "download_pdf": "Pobierz Raport PDF",
+        "risk_level": "Poziom",
+        "live_risk": "Wyliczony poziom ryzyka:",
+        "category": "Kategoria",
+        "table_title": "Rejestr Ryzyk (Kliknij dwukrotnie by edytować, zaznacz i wciśnij DEL by usunąć)",
         "filter": "Filtruj po Kategorii",
         "all": "Wszystkie",
-        "matrix_title": "Macierz Ryzyka",
-        "download_btn": "Pobierz CSV",
-        "download_pdf_btn": "Pobierz PDF",
-        "risk_level": "Poziom Ryzyka",
-        "category": "Kategoria",
-        "table_title": "Rejestr Ryzyk",
-        "no_data": "Brak dodanych ryzyk. Użyj panelu bocznego, aby dodać wpisy.",
-        "total_risks": "Całkowita liczba ryzyk",
-        "critical_risks": "Ryzyka Wysokie",
-        "medium_risks": "Ryzyka Średnie",
-        "low_risks": "Ryzyka Niskie",
-        "report_title": "Raport Ryzyka"
+        "kpi_total": "Całkowita liczba",
+        "kpi_high": "Wysokie",
+        "kpi_medium": "Średnie",
+        "kpi_low": "Niskie",
+        "no_data": "Brak danych. Skorzystaj z panelu bocznego, aby dodać ryzyko."
     }
 }
 
-lang = st.sidebar.radio("Language / Język", ["EN", "PL"], horizontal=True)
+st.set_page_config(page_title="Risk Assessment App", layout="wide")
+
+lang = st.sidebar.radio("Language / Język", ["PL", "EN"], horizontal=True)
 t = translations[lang]
+treatment_options = [t["treat_red"], t["treat_acc"], t["treat_trans"], t["treat_avoid"]]
 
-def get_internal_category(score, med_t, high_t):
-    if score < med_t:
-        return "low"
-    elif score < high_t:
-        return "medium"
-    else:
-        return "high"
+def get_category(score, med_t, high_t):
+    if score < med_t: return t["low"]
+    elif score < high_t: return t["medium"]
+    return t["high"]
 
-def normalize_text_for_pdf(text):
-    pl_map = {'ą':'a', 'ć':'c', 'ę':'e', 'ł':'l', 'ń':'n', 'ó':'o', 'ś':'s', 'ź':'z', 'ż':'z',
-              'Ą':'A', 'Ć':'C', 'Ę':'E', 'Ł':'L', 'Ń':'N', 'Ó':'O', 'Ś':'S', 'Ź':'Z', 'Ż':'Z'}
-    res = str(text)
-    for k, v in pl_map.items():
-        res = res.replace(k, v)
-    return unicodedata.normalize('NFKD', res).encode('ascii', 'ignore').decode('ascii')
+def clean_text_for_pdf(text):
+    if not isinstance(text, str): return str(text)
+    trans = str.maketrans("ąćęłńóśźżĄĆĘŁŃÓŚŹŻ", "acelnoszzACELNOSZZ")
+    return text.translate(trans).encode('latin-1', 'replace').decode('latin-1')
 
-def truncate(text, max_len):
-    text = str(text)
-    return text[:max_len-2] + ".." if len(text) > max_len else text
-
-def generate_pdf(dataframe, t_dict):
-    pdf = FPDF()
-    pdf.add_page(orientation="L")
-    
-    pdf.set_font("Arial", "B", 14)
-    pdf.cell(0, 10, normalize_text_for_pdf(t_dict["report_title"]), ln=True, align="C")
-    pdf.ln(5)
-    
-    col_widths = [40, 45, 45, 45, 45, 20, 35]
-    char_limits = [20, 24, 24, 24, 24, 10, 18]
-    
-    pdf.set_font("Arial", "B", 8)
-    headers = [t_dict["asset"], t_dict["threat"], t_dict["vulnerability"], 
-               t_dict["treatment"], t_dict["controls"], t_dict["risk_level"], t_dict["category"]]
-    
-    for i, header in enumerate(headers):
-        h_text = normalize_text_for_pdf(header)
-        pdf.cell(col_widths[i], 10, truncate(h_text, char_limits[i]), border=1, align="C")
-    pdf.ln()
-    
-    pdf.set_font("Arial", "", 8)
-    for _, row in dataframe.iterrows():
-        pdf.cell(col_widths[0], 10, truncate(normalize_text_for_pdf(row[t_dict["asset"]]), char_limits[0]), border=1)
-        pdf.cell(col_widths[1], 10, truncate(normalize_text_for_pdf(row[t_dict["threat"]]), char_limits[1]), border=1)
-        pdf.cell(col_widths[2], 10, truncate(normalize_text_for_pdf(row[t_dict["vulnerability"]]), char_limits[2]), border=1)
-        pdf.cell(col_widths[3], 10, truncate(normalize_text_for_pdf(row[t_dict["treatment"]]), char_limits[3]), border=1)
-        pdf.cell(col_widths[4], 10, truncate(normalize_text_for_pdf(row[t_dict["controls"]]), char_limits[4]), border=1)
-        pdf.cell(col_widths[5], 10, str(row[t_dict["risk_level"]]), border=1, align="C")
-        pdf.cell(col_widths[6], 10, truncate(normalize_text_for_pdf(row[t_dict["category"]]), char_limits[6]), border=1)
-        pdf.ln()
-        
-    pdf_out = pdf.output(dest="S")
-    if isinstance(pdf_out, (bytes, bytearray)):
-        return bytes(pdf_out)
-    return pdf_out.encode("latin-1", "replace")
+# --- SIDEBAR: SETTINGS ---
+st.sidebar.header(t["method_title"])
+st.sidebar.selectbox("", [t["method_1"], t["method_2"]], label_visibility="collapsed")
+st.sidebar.divider()
 
 st.sidebar.header(t["settings_title"])
 med_thresh = st.sidebar.number_input(t["med_threshold"], min_value=2, max_value=25, value=5)
 high_thresh = st.sidebar.number_input(t["high_threshold"], min_value=int(med_thresh), max_value=25, value=15)
 st.sidebar.divider()
 
+# --- SIDEBAR: ADD NEW RISK ---
 st.sidebar.header(t["sidebar_title"])
-asset_input = st.sidebar.text_input(t["asset"])
-threat_input = st.sidebar.text_input(t["threat"])
-vuln_input = st.sidebar.text_input(t["vulnerability"])
-controls_input = st.sidebar.text_input(t["controls"])
 
-treatment_options_internal = ["mitigate", "accept", "transfer", "avoid"]
-treatment_options_display = [t[opt] for opt in treatment_options_internal]
-treatment_selection = st.sidebar.selectbox(t["treatment"], treatment_options_display)
-treatment_internal = treatment_options_internal[treatment_options_display.index(treatment_selection)]
+# Обычные виджеты вместо st.form, чтобы уровень риска обновлялся в реальном времени
+st.sidebar.text_input(t["asset"] + " *", key="in_asset")
+st.sidebar.text_input(t["threat"] + " *", key="in_threat")
+st.sidebar.text_input(t["vulnerability"] + " *", key="in_vuln")
+st.sidebar.text_input(t["controls"], key="in_controls")
 
-prob_input = st.sidebar.slider(t["probability"], 1, 5, 1)
-impact_input = st.sidebar.slider(t["impact"], 1, 5, 1)
+# Ползунки для вероятности и последствий
+st.sidebar.slider(t["probability"], 1, 5, key="in_prob")
+st.sidebar.slider(t["impact"], 1, 5, key="in_imp")
 
-if st.sidebar.button(t["add_btn"]):
-    if not asset_input or not threat_input or not vuln_input:
-        st.sidebar.error(t["req_warning"])
-    else:
+# ДИНАМИЧЕСКИЙ ПОДСЧЕТ УРОВНЯ РИСКА
+current_risk_score = st.session_state.in_prob * st.session_state.in_imp
+current_category = get_category(current_risk_score, med_thresh, high_thresh)
+
+# Цветовая индикация для предпросмотра
+color = "green" if current_category == t["low"] else "orange" if current_category == t["medium"] else "red"
+st.sidebar.markdown(f"**{t['live_risk']}** <span style='color:{color}; font-size:18px; font-weight:bold;'>{current_risk_score} ({current_category})</span>", unsafe_allow_html=True)
+st.sidebar.write("") # отступ
+
+# Postępowanie z ryzykiem в самом низу
+st.sidebar.selectbox(t["treatment"], treatment_options, key="in_treat")
+
+# Функция обратного вызова для добавления риска и очистки полей
+def add_risk_callback():
+    if st.session_state.in_asset and st.session_state.in_threat and st.session_state.in_vuln:
+        # Добавляем в список
         st.session_state.risks.append({
-            "asset": asset_input,
-            "threat": threat_input,
-            "vulnerability": vuln_input,
-            "controls": controls_input,
-            "treatment": treatment_internal,
-            "probability": prob_input,
-            "impact": impact_input
+            "asset": st.session_state.in_asset,
+            "threat": st.session_state.in_threat,
+            "vulnerability": st.session_state.in_vuln,
+            "controls": st.session_state.in_controls,
+            "probability": st.session_state.in_prob,
+            "impact": st.session_state.in_imp,
+            "treatment": st.session_state.in_treat
         })
-        st.sidebar.success("Added!")
+        # Очищаем поля
+        st.session_state.in_asset = ""
+        st.session_state.in_threat = ""
+        st.session_state.in_vuln = ""
+        st.session_state.in_controls = ""
+        st.session_state.in_prob = 1
+        st.session_state.in_imp = 1
+
+        st.toast(t["add_success"], icon="✅")
+    else:
+        st.toast(t["req_warning"], icon="⚠️")
+
+st.sidebar.button(t["add_btn"], on_click=add_risk_callback, type="primary", use_container_width=True)
 
 st.sidebar.divider()
 
+# --- SIDEBAR: IMPORT ---
 st.sidebar.header(t["upload_csv"])
-uploaded_file = st.sidebar.file_uploader("", type=["csv"])
-if st.sidebar.button(t["import_btn"]):
-    if uploaded_file is not None:
-        try:
-            import_df = pd.read_csv(uploaded_file, sep=';')
-            
-            reverse_map = {}
-            for lang_code, lang_dict in translations.items():
-                reverse_map[lang_dict["asset"]] = "asset"
-                reverse_map[lang_dict["threat"]] = "threat"
-                reverse_map[lang_dict["vulnerability"]] = "vulnerability"
-                reverse_map[lang_dict["controls"]] = "controls"
-                reverse_map[lang_dict["treatment"]] = "treatment"
-                reverse_map[lang_dict["probability"]] = "probability"
-                reverse_map[lang_dict["impact"]] = "impact"
-            
-            new_risks = []
-            for _, row in import_df.iterrows():
-                risk = {"controls": "", "treatment": "mitigate"}
-                for col in import_df.columns:
-                    if col in reverse_map:
-                        risk[reverse_map[col]] = row[col]
-                
-                if "asset" in risk and "probability" in risk and "impact" in risk:
-                    risk["probability"] = int(risk["probability"])
-                    risk["impact"] = int(risk["impact"])
-                    new_risks.append(risk)
-                    
-            st.session_state.risks = new_risks
-            st.sidebar.success(t["upload_success"])
-            st.rerun()
-        except Exception as e:
-            st.sidebar.error(t["upload_error"])
+uploaded_file = st.sidebar.file_uploader("", type=["csv"], label_visibility="collapsed")
+if st.sidebar.button(t["import_btn"]) and uploaded_file:
+    try:
+        import_df = pd.read_csv(uploaded_file, sep=';')
 
+        reverse_map = {}
+        for lang_dict in translations.values():
+            for k in ["asset", "threat", "vulnerability", "controls", "probability", "impact", "treatment"]:
+                if k in lang_dict:
+                    reverse_map[lang_dict[k]] = k
+
+        import_df = import_df.rename(columns=reverse_map)
+        st.session_state.risks = import_df.to_dict('records')
+        st.rerun()
+    except Exception:
+        st.sidebar.error(t.get("upload_error", "Error"))
+
+# --- MAIN PAGE ---
 st.title(t["title"])
+
+base_cols = ["asset", "threat", "vulnerability", "controls", "probability", "impact", "treatment"]
 
 if not st.session_state.risks:
     st.info(t["no_data"])
+    df = pd.DataFrame(columns=base_cols)
 else:
     df = pd.DataFrame(st.session_state.risks)
-    
-    df['risk_level'] = df['probability'] * df['impact']
-    df['internal_category'] = df['risk_level'].apply(lambda x: get_internal_category(x, med_thresh, high_thresh))
-    df['category'] = df['internal_category'].map(lambda x: t[x])
-    df['treatment_display'] = df['treatment'].map(lambda x: t[x] if x in t else x)
-    
-    display_df = df.rename(columns={
-        "asset": t["asset"],
-        "threat": t["threat"],
-        "vulnerability": t["vulnerability"],
-        "controls": t["controls"],
-        "treatment_display": t["treatment"],
-        "probability": t["probability"],
-        "impact": t["impact"],
-        "risk_level": t["risk_level"],
-        "category": t["category"]
-    }).drop(columns=["internal_category", "treatment"])
-    
-    st.subheader(t["table_title"])
-    
-    filter_options = [t["all"], t["low"], t["medium"], t["high"]]
-    selected_filter = st.selectbox(t["filter"], filter_options)
-    
-    if selected_filter == t["all"]:
-        filtered_df = display_df
-    else:
-        filtered_df = display_df[display_df[t["category"]] == selected_filter]
-        
-    dash_col1, dash_col2, dash_col3, dash_col4 = st.columns(4)
-    dash_col1.metric(t["total_risks"], len(filtered_df))
-    dash_col2.metric(t["critical_risks"], len(filtered_df[filtered_df[t["category"]] == t["high"]]))
-    dash_col3.metric(t["medium_risks"], len(filtered_df[filtered_df[t["category"]] == t["medium"]]))
-    dash_col4.metric(t["low_risks"], len(filtered_df[filtered_df[t["category"]] == t["low"]]))
-    
-    st.dataframe(filtered_df, use_container_width=True)
-    
+
+for col in base_cols:
+    if col not in df.columns:
+        df[col] = ""
+
+# Расчеты уровней риска для датафрейма
+df['probability'] = pd.to_numeric(df.get('probability', pd.Series(dtype=int)), errors='coerce').fillna(1).astype(int)
+df['impact'] = pd.to_numeric(df.get('impact', pd.Series(dtype=int)), errors='coerce').fillna(1).astype(int)
+df['risk_level'] = df['probability'] * df['impact']
+df['category'] = df['risk_level'].apply(lambda x: get_category(x, med_thresh, high_thresh))
+
+# Индикаторы (KPI)
+if not df.empty:
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric(t["kpi_total"], len(df))
+    c2.metric(t["kpi_high"], len(df[df['category'] == t["high"]]))
+    c3.metric(t["kpi_medium"], len(df[df['category'] == t["medium"]]))
+    c4.metric(t["kpi_low"], len(df[df['category'] == t["low"]]))
+
+st.divider()
+
+# --- ТАБЛИЦА РИСКОВ (Редактируемая) ---
+st.subheader(t["table_title"])
+
+cat_filter = st.selectbox(t["filter"], [t["all"], t["low"], t["medium"], t["high"]])
+display_df = df if cat_filter == t["all"] else df[df['category'] == cat_filter]
+
+col_order = ["asset", "threat", "vulnerability", "controls", "probability", "impact", "risk_level", "category", "treatment"]
+
+# st.data_editor позволяет редактировать и удалять данные
+edited_df = st.data_editor(
+    display_df,
+    column_order=col_order,
+    column_config={
+        "asset": st.column_config.TextColumn(t["asset"], required=True),
+        "threat": st.column_config.TextColumn(t["threat"], required=True),
+        "vulnerability": st.column_config.TextColumn(t["vulnerability"], required=True),
+        "controls": st.column_config.TextColumn(t["controls"]),
+        "probability": st.column_config.NumberColumn(t["probability"], min_value=1, max_value=5),
+        "impact": st.column_config.NumberColumn(t["impact"], min_value=1, max_value=5),
+        "risk_level": st.column_config.NumberColumn(t["risk_level"], disabled=True),
+        "category": st.column_config.TextColumn(t["category"], disabled=True),
+        "treatment": st.column_config.SelectboxColumn(t["treatment"], options=treatment_options)
+    },
+    num_rows="dynamic", # Позволяет удалять строки клавишей DEL
+    use_container_width=True,
+    hide_index=True
+)
+
+if 'asset' in edited_df.columns:
+    clean_edited = edited_df.dropna(subset=['asset']).fillna("")
+else:
+    clean_edited = edited_df.fillna("")
+
+for col in base_cols:
+    if col not in clean_edited.columns:
+        clean_edited[col] = ""
+
+new_state = clean_edited[base_cols].to_dict('records')
+
+# Синхронизация изменений из таблицы обратно в сессию
+if cat_filter == t["all"] and new_state != st.session_state.risks:
+    st.session_state.risks = new_state
+    st.rerun()
+
+st.divider()
+
+# --- МАТРИЦА РИСКОВ И ЭКСПОРТ ---
+st.subheader(t["matrix_title"])
+if not edited_df.empty:
+    plot_df = edited_df.copy()
+    # Jitter нужен, чтобы точки с одинаковыми координатами не перекрывали друг друга
+    plot_df['p_jitter'] = plot_df['probability'] + np.random.uniform(-0.15, 0.15, len(plot_df))
+    plot_df['i_jitter'] = plot_df['impact'] + np.random.uniform(-0.15, 0.15, len(plot_df))
+
+    fig = px.scatter(
+        plot_df, x='i_jitter', y='p_jitter', color='category', hover_name=plot_df.get('asset', 'Item'),
+        hover_data={'i_jitter': False, 'p_jitter': False, 'probability': True, 'impact': True, 'risk_level': True},
+        color_discrete_map={t["low"]: "green", t["medium"]: "gold", t["high"]: "crimson"}, size_max=15
+    )
+    fig.update_layout(xaxis_title=t["impact"], yaxis_title=t["probability"], xaxis_range=[0.5, 5.5], yaxis_range=[0.5, 5.5])
+    fig.update_traces(marker=dict(size=12, line=dict(width=1, color='black')))
+    st.plotly_chart(fig, use_container_width=True)
+
     st.divider()
 
-    st.subheader(t["matrix_title"])
-    
-    if not filtered_df.empty:
-        color_map = {
-            t["low"]: "green",
-            t["medium"]: "yellow",
-            t["high"]: "red"
-        }
-        
-        plot_df = filtered_df.copy()
-        plot_df['plot_impact'] = plot_df[t["impact"]] + np.random.uniform(-0.15, 0.15, len(plot_df))
-        plot_df['plot_prob'] = plot_df[t["probability"]] + np.random.uniform(-0.15, 0.15, len(plot_df))
-        
-        fig = px.scatter(
-            plot_df,
-            x='plot_impact',
-            y='plot_prob',
-            color=t["category"],
-            hover_name=t["asset"],
-            hover_data={
-                'plot_impact': False,
-                'plot_prob': False,
-                t["probability"]: True,
-                t["impact"]: True,
-                t["threat"]: True,
-                t["vulnerability"]: True,
-                t["treatment"]: True,
-                t["risk_level"]: True
-            },
-            color_discrete_map=color_map,
-            size_max=15
-        )
-        
-        fig.update_layout(
-            xaxis=dict(title=t["impact"], range=[0.5, 5.5], tickmode='linear', dtick=1),
-            yaxis=dict(title=t["probability"], range=[0.5, 5.5], tickmode='linear', dtick=1)
-        )
-        fig.update_traces(marker=dict(size=12, line=dict(width=1, color='DarkSlateGrey')))
-        
-        st.plotly_chart(fig, use_container_width=True)
-        
-        st.divider()
-        
-        btn_col1, btn_col2 = st.columns(2)
-        
-        with btn_col1:
-            csv_data = filtered_df.to_csv(index=False, sep=';').encode('utf-8-sig')
-            st.download_button(
-                label=t["download_btn"],
-                data=csv_data,
-                file_name="risk_register.csv",
-                mime="text/csv"
-            )
-            
-        with btn_col2:
-            pdf_data = generate_pdf(filtered_df, t)
-            st.download_button(
-                label=t["download_pdf_btn"],
-                data=pdf_data,
-                file_name="risk_report.pdf",
-                mime="application/pdf"
-            )
+    export_df = edited_df[col_order].rename(columns={k: t.get(k, k) for k in col_order})
+
+    col_export1, col_export2 = st.columns(2)
+    # Экспорт в CSV
+    col_export1.download_button(
+        t["download_csv"],
+        data=export_df.to_csv(index=False, sep=';').encode('utf-8-sig'),
+        file_name="risk_register.csv", mime="text/csv"
+    )
+
+    # Экспорт в PDF (обновленный по просьбе тиммейта)
+    if FPDF_AVAILABLE:
+        pdf = FPDF(orientation='L', unit='mm', format='A4')
+        pdf.add_page()
+        pdf.set_font("Arial", 'B', 12)
+        pdf.cell(0, 10, txt=clean_text_for_pdf(t["title"]), ln=True, align='C')
+        pdf.ln(5)
+
+        pdf.set_font("Arial", 'B', 9)
+        # Убраны колонки Controls, Probability, Impact. Ширина распределена между оставшимися
+        col_widths = [50, 50, 50, 25, 30, 65]
+        headers = [t["asset"], t["threat"], t["vulnerability"], t["risk_level"], t["category"], t["treatment"]]
+
+        for width, header in zip(col_widths, headers):
+            pdf.cell(width, 8, txt=clean_text_for_pdf(header)[:30], border=1, align='C')
+        pdf.ln()
+
+        pdf.set_font("Arial", '', 8)
+        for _, row in export_df.iterrows():
+            pdf.cell(col_widths[0], 8, txt=clean_text_for_pdf(str(row.get(t["asset"], "")))[:35], border=1)
+            pdf.cell(col_widths[1], 8, txt=clean_text_for_pdf(str(row.get(t["threat"], "")))[:35], border=1)
+            pdf.cell(col_widths[2], 8, txt=clean_text_for_pdf(str(row.get(t["vulnerability"], "")))[:35], border=1)
+            pdf.cell(col_widths[3], 8, txt=str(row.get(t["risk_level"], "")), border=1, align='C')
+            pdf.cell(col_widths[4], 8, txt=clean_text_for_pdf(str(row.get(t["category"], ""))), border=1, align='C')
+            pdf.cell(col_widths[5], 8, txt=clean_text_for_pdf(str(row.get(t["treatment"], "")))[:45], border=1)
+            pdf.ln()
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+            pdf.output(tmp.name)
+            with open(tmp.name, "rb") as f:
+                pdf_bytes = f.read()
+        os.remove(tmp.name)
+
+        col_export2.download_button(t["download_pdf"], data=pdf_bytes, file_name="risk_report.pdf", mime="application/pdf")
+    else:
+        col_export2.error("Do eksportu PDF wymagana jest biblioteka FPDF. Wpisz w terminalu: pip install fpdf")
