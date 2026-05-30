@@ -11,11 +11,9 @@ try:
 except ImportError:
     FPDF_AVAILABLE = False
 
-# Инициализация хранилища данных сессии
 if 'risks' not in st.session_state:
     st.session_state.risks = []
 
-# Инициализация состояний для полей ввода (чтобы можно было их очищать)
 input_keys = ['in_asset', 'in_threat', 'in_vuln', 'in_controls']
 for key in input_keys:
     if key not in st.session_state:
@@ -28,15 +26,18 @@ translations = {
     "EN": {
         "title": "Information Security Risk Assessment",
         "method_title": "Assessment Method",
-        "method_1": "Matrix Method (Quantitative-Qualitative)",
-        "method_2": "Quantitative Method",
+        "method_1": "Multiplicative (P * I)",
+        "method_2": "Additive (P + I)",
+        "scale_title": "Scale Max Value (e.g., 5 or 10)",
+        "weight_p": "Prob. Weight",
+        "weight_i": "Impact Weight",
         "sidebar_title": "Add New Risk",
         "asset": "Asset",
         "threat": "Threat",
         "vulnerability": "Vulnerability",
         "controls": "Controls",
-        "probability": "Probability (1-5)",
-        "impact": "Impact (1-5)",
+        "probability": "Probability",
+        "impact": "Impact",
         "treatment": "Treatment Strategy",
         "treat_red": "Reduction",
         "treat_acc": "Acceptance",
@@ -72,15 +73,18 @@ translations = {
     "PL": {
         "title": "Ocena Ryzyka Bezpieczeństwa Informacji",
         "method_title": "Wybór metody szacowania",
-        "method_1": "Metoda matrycowa (Ilościowo-Jakościowa)",
-        "method_2": "Metoda ilościowa",
+        "method_1": "Ilościowo-Jakościowa (P * S)",
+        "method_2": "Addytywna (P + S)",
+        "scale_title": "Max Skala (np. 5 lub 10)",
+        "weight_p": "Waga Prawdop.",
+        "weight_i": "Waga Skutków",
         "sidebar_title": "Dodaj Nowe Ryzyko",
         "asset": "Aktywo",
         "threat": "Zagrożenie",
         "vulnerability": "Podatność",
         "controls": "Zabezpieczenia",
-        "probability": "Prawdopodobieństwo (1-5)",
-        "impact": "Skutki (1-5)",
+        "probability": "Prawdopodobieństwo",
+        "impact": "Skutki",
         "treatment": "Postępowanie z ryzykiem",
         "treat_red": "Redukcja",
         "treat_acc": "Akceptacja",
@@ -131,45 +135,55 @@ def clean_text_for_pdf(text):
     trans = str.maketrans("ąćęłńóśźżĄĆĘŁŃÓŚŹŻ", "acelnoszzACELNOSZZ")
     return text.translate(trans).encode('latin-1', 'replace').decode('latin-1')
 
-# --- SIDEBAR: SETTINGS ---
 st.sidebar.header(t["method_title"])
-st.sidebar.selectbox("", [t["method_1"], t["method_2"]], label_visibility="collapsed")
+selected_method = st.sidebar.selectbox("", [t["method_1"], t["method_2"]], label_visibility="collapsed")
 st.sidebar.divider()
 
 st.sidebar.header(t["settings_title"])
-med_thresh = st.sidebar.number_input(t["med_threshold"], min_value=2, max_value=25, value=5)
-high_thresh = st.sidebar.number_input(t["high_threshold"], min_value=int(med_thresh), max_value=25, value=15)
+max_scale = st.sidebar.number_input(t["scale_title"], min_value=3, max_value=20, value=5)
+
+col1, col2 = st.sidebar.columns(2)
+weight_p = col1.number_input(t["weight_p"], min_value=0.1, value=1.0, step=0.1)
+weight_i = col2.number_input(t["weight_i"], min_value=0.1, value=1.0, step=0.1)
+
+if selected_method == t["method_1"]:
+    max_possible_score = (max_scale * weight_p) * (max_scale * weight_i)
+else:
+    max_possible_score = (max_scale * weight_p) + (max_scale * weight_i)
+
+default_med = min(float(max_scale), float(max_possible_score))
+default_high = max(default_med, min(float(max_scale * 3), float(max_possible_score)))
+
+med_thresh = st.sidebar.number_input(t["med_threshold"], min_value=1.0, max_value=float(max_possible_score), value=default_med)
+high_thresh = st.sidebar.number_input(t["high_threshold"], min_value=float(med_thresh), max_value=float(max_possible_score), value=default_high)
 st.sidebar.divider()
 
-# --- SIDEBAR: ADD NEW RISK ---
 st.sidebar.header(t["sidebar_title"])
 
-# Обычные виджеты вместо st.form, чтобы уровень риска обновлялся в реальном времени
 st.sidebar.text_input(t["asset"] + " *", key="in_asset")
 st.sidebar.text_input(t["threat"] + " *", key="in_threat")
 st.sidebar.text_input(t["vulnerability"] + " *", key="in_vuln")
 st.sidebar.text_input(t["controls"], key="in_controls")
 
-# Ползунки для вероятности и последствий
-st.sidebar.slider(t["probability"], 1, 5, key="in_prob")
-st.sidebar.slider(t["impact"], 1, 5, key="in_imp")
+st.sidebar.slider(f"{t['probability']} (1-{int(max_scale)})", 1, int(max_scale), key="in_prob")
+st.sidebar.slider(f"{t['impact']} (1-{int(max_scale)})", 1, int(max_scale), key="in_imp")
 
-# ДИНАМИЧЕСКИЙ ПОДСЧЕТ УРОВНЯ РИСКА
-current_risk_score = st.session_state.in_prob * st.session_state.in_imp
+if selected_method == t["method_1"]:
+    current_risk_score = (st.session_state.in_prob * weight_p) * (st.session_state.in_imp * weight_i)
+else:
+    current_risk_score = (st.session_state.in_prob * weight_p) + (st.session_state.in_imp * weight_i)
+
+current_risk_score = round(current_risk_score, 2)
 current_category = get_category(current_risk_score, med_thresh, high_thresh)
 
-# Цветовая индикация для предпросмотра
 color = "green" if current_category == t["low"] else "orange" if current_category == t["medium"] else "red"
 st.sidebar.markdown(f"**{t['live_risk']}** <span style='color:{color}; font-size:18px; font-weight:bold;'>{current_risk_score} ({current_category})</span>", unsafe_allow_html=True)
-st.sidebar.write("") # отступ
+st.sidebar.write("")
 
-# Postępowanie z ryzykiem в самом низу
 st.sidebar.selectbox(t["treatment"], treatment_options, key="in_treat")
 
-# Функция обратного вызова для добавления риска и очистки полей
 def add_risk_callback():
     if st.session_state.in_asset and st.session_state.in_threat and st.session_state.in_vuln:
-        # Добавляем в список
         st.session_state.risks.append({
             "asset": st.session_state.in_asset,
             "threat": st.session_state.in_threat,
@@ -179,7 +193,6 @@ def add_risk_callback():
             "impact": st.session_state.in_imp,
             "treatment": st.session_state.in_treat
         })
-        # Очищаем поля
         st.session_state.in_asset = ""
         st.session_state.in_threat = ""
         st.session_state.in_vuln = ""
@@ -195,7 +208,6 @@ st.sidebar.button(t["add_btn"], on_click=add_risk_callback, type="primary", use_
 
 st.sidebar.divider()
 
-# --- SIDEBAR: IMPORT ---
 st.sidebar.header(t["upload_csv"])
 uploaded_file = st.sidebar.file_uploader("", type=["csv"], label_visibility="collapsed")
 if st.sidebar.button(t["import_btn"]) and uploaded_file:
@@ -214,7 +226,6 @@ if st.sidebar.button(t["import_btn"]) and uploaded_file:
     except Exception:
         st.sidebar.error(t.get("upload_error", "Error"))
 
-# --- MAIN PAGE ---
 st.title(t["title"])
 
 base_cols = ["asset", "threat", "vulnerability", "controls", "probability", "impact", "treatment"]
@@ -229,13 +240,17 @@ for col in base_cols:
     if col not in df.columns:
         df[col] = ""
 
-# Расчеты уровней риска для датафрейма
 df['probability'] = pd.to_numeric(df.get('probability', pd.Series(dtype=int)), errors='coerce').fillna(1).astype(int)
 df['impact'] = pd.to_numeric(df.get('impact', pd.Series(dtype=int)), errors='coerce').fillna(1).astype(int)
-df['risk_level'] = df['probability'] * df['impact']
+
+if selected_method == t["method_1"]:
+    df['risk_level'] = (df['probability'] * weight_p) * (df['impact'] * weight_i)
+else:
+    df['risk_level'] = (df['probability'] * weight_p) + (df['impact'] * weight_i)
+
+df['risk_level'] = df['risk_level'].round(2)
 df['category'] = df['risk_level'].apply(lambda x: get_category(x, med_thresh, high_thresh))
 
-# Индикаторы (KPI)
 if not df.empty:
     c1, c2, c3, c4 = st.columns(4)
     c1.metric(t["kpi_total"], len(df))
@@ -245,7 +260,6 @@ if not df.empty:
 
 st.divider()
 
-# --- ТАБЛИЦА РИСКОВ (Редактируемая) ---
 st.subheader(t["table_title"])
 
 cat_filter = st.selectbox(t["filter"], [t["all"], t["low"], t["medium"], t["high"]])
@@ -253,7 +267,6 @@ display_df = df if cat_filter == t["all"] else df[df['category'] == cat_filter]
 
 col_order = ["asset", "threat", "vulnerability", "controls", "probability", "impact", "risk_level", "category", "treatment"]
 
-# st.data_editor позволяет редактировать и удалять данные
 edited_df = st.data_editor(
     display_df,
     column_order=col_order,
@@ -262,13 +275,13 @@ edited_df = st.data_editor(
         "threat": st.column_config.TextColumn(t["threat"], required=True),
         "vulnerability": st.column_config.TextColumn(t["vulnerability"], required=True),
         "controls": st.column_config.TextColumn(t["controls"]),
-        "probability": st.column_config.NumberColumn(t["probability"], min_value=1, max_value=5),
-        "impact": st.column_config.NumberColumn(t["impact"], min_value=1, max_value=5),
+        "probability": st.column_config.NumberColumn(t["probability"], min_value=1, max_value=int(max_scale)),
+        "impact": st.column_config.NumberColumn(t["impact"], min_value=1, max_value=int(max_scale)),
         "risk_level": st.column_config.NumberColumn(t["risk_level"], disabled=True),
         "category": st.column_config.TextColumn(t["category"], disabled=True),
         "treatment": st.column_config.SelectboxColumn(t["treatment"], options=treatment_options)
     },
-    num_rows="dynamic", # Позволяет удалять строки клавишей DEL
+    num_rows="dynamic",
     use_container_width=True,
     hide_index=True
 )
@@ -284,18 +297,15 @@ for col in base_cols:
 
 new_state = clean_edited[base_cols].to_dict('records')
 
-# Синхронизация изменений из таблицы обратно в сессию
 if cat_filter == t["all"] and new_state != st.session_state.risks:
     st.session_state.risks = new_state
     st.rerun()
 
 st.divider()
 
-# --- МАТРИЦА РИСКОВ И ЭКСПОРТ ---
 st.subheader(t["matrix_title"])
 if not edited_df.empty:
     plot_df = edited_df.copy()
-    # Jitter нужен, чтобы точки с одинаковыми координатами не перекрывали друг друга
     plot_df['p_jitter'] = plot_df['probability'] + np.random.uniform(-0.15, 0.15, len(plot_df))
     plot_df['i_jitter'] = plot_df['impact'] + np.random.uniform(-0.15, 0.15, len(plot_df))
 
@@ -304,7 +314,7 @@ if not edited_df.empty:
         hover_data={'i_jitter': False, 'p_jitter': False, 'probability': True, 'impact': True, 'risk_level': True},
         color_discrete_map={t["low"]: "green", t["medium"]: "gold", t["high"]: "crimson"}, size_max=15
     )
-    fig.update_layout(xaxis_title=t["impact"], yaxis_title=t["probability"], xaxis_range=[0.5, 5.5], yaxis_range=[0.5, 5.5])
+    fig.update_layout(xaxis_title=t["impact"], yaxis_title=t["probability"], xaxis_range=[0.5, max_scale + 0.5], yaxis_range=[0.5, max_scale + 0.5])
     fig.update_traces(marker=dict(size=12, line=dict(width=1, color='black')))
     st.plotly_chart(fig, use_container_width=True)
 
@@ -313,14 +323,12 @@ if not edited_df.empty:
     export_df = edited_df[col_order].rename(columns={k: t.get(k, k) for k in col_order})
 
     col_export1, col_export2 = st.columns(2)
-    # Экспорт в CSV
     col_export1.download_button(
         t["download_csv"],
         data=export_df.to_csv(index=False, sep=';').encode('utf-8-sig'),
         file_name="risk_register.csv", mime="text/csv"
     )
 
-    # Экспорт в PDF (обновленный по просьбе тиммейта)
     if FPDF_AVAILABLE:
         pdf = FPDF(orientation='L', unit='mm', format='A4')
         pdf.add_page()
@@ -329,7 +337,6 @@ if not edited_df.empty:
         pdf.ln(5)
 
         pdf.set_font("Arial", 'B', 9)
-        # Убраны колонки Controls, Probability, Impact. Ширина распределена между оставшимися
         col_widths = [50, 50, 50, 25, 30, 65]
         headers = [t["asset"], t["threat"], t["vulnerability"], t["risk_level"], t["category"], t["treatment"]]
 
